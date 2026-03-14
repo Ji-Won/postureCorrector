@@ -1,6 +1,21 @@
 import cv2
 import mediapipe as mp
 import time
+import json
+import os
+
+# --- PERSISTENT MEMORY SETUP ---
+CONFIG_FILE = "config.json"
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f).get('threshold', None)
+    return None
+
+def save_config(threshold):
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump({'threshold': threshold}, f)
 
 # 1. Setup MediaPipe
 mp_pose = mp.solutions.pose
@@ -9,14 +24,21 @@ mp_draw = mp.solutions.drawing_utils
 
 cap = cv2.VideoCapture(0)
 
-# --- NEW: Calibration Variables ---
-calibrating = True
-calibration_start = time.time()
-calibration_duration = 5 # 5 seconds to calibrate
+# --- CALIBRATION VARIABLES ---
+calibration_duration = 5
 baseline_ratios = []
-slouch_threshold = 0.0
 
-print("Starting Posture Corrector. Please sit up straight for calibration!")
+# Check if we already have a saved threshold
+saved_threshold = load_config()
+if saved_threshold is not None:
+    slouch_threshold = saved_threshold
+    calibrating = False
+    print(f"Loaded saved threshold: {slouch_threshold:.2f}")
+else:
+    slouch_threshold = 0.0
+    calibrating = True
+    calibration_start = time.time()
+    print("No save found. Starting calibration...")
 
 while cap.isOpened():
     success, image = cap.read()
@@ -48,15 +70,18 @@ while cap.isOpened():
                 baseline_ratios.append(ratio)
                 time_left = int(calibration_duration - (time.time() - calibration_start))
                 
-                # Draw yellow calibration text
                 cv2.putText(image, f"CALIBRATING: Sit straight! ({time_left}s)", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 3)
                 
                 if time.time() - calibration_start > calibration_duration:
                     calibrating = False
-                    # Calculate the personal baseline and set the threshold 0.08 below it
                     avg_baseline = sum(baseline_ratios) / len(baseline_ratios)
-                    slouch_threshold = avg_baseline - 0.08 
-                    print(f"Calibration done! Baseline: {avg_baseline:.2f}, Threshold: {slouch_threshold:.2f}")
+                    
+                    # Set your sensitivity here (e.g., 0.04)
+                    slouch_threshold = avg_baseline - 0.06 
+                    
+                    # Save it to the file!
+                    save_config(slouch_threshold)
+                    print(f"Calibration saved! Threshold: {slouch_threshold:.2f}")
             
             # --- PHASE 2: ACTIVE TRACKING ---
             else:
@@ -69,12 +94,22 @@ while cap.isOpened():
                 
                 cv2.putText(image, f"Status: {status}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 3)
                 cv2.putText(image, f"Ratio: {ratio:.2f} (Target: {slouch_threshold:.2f})", (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(image, "Press 'r' to recalibrate", (20, 140), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
         
         mp_draw.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
     cv2.imshow('Posture Corrector', image)
 
-    if cv2.waitKey(5) & 0xFF == ord('q'): break
+    # --- KEYBOARD CONTROLS ---
+    key = cv2.waitKey(5) & 0xFF
+    if key == ord('q'):
+        break
+    elif key == ord('r'): # The new Recalibrate button!
+        print("Recalibrating...")
+        calibrating = True
+        calibration_start = time.time()
+        baseline_ratios = [] # Clear the old data
+        
     try:
         if cv2.getWindowProperty('Posture Corrector', cv2.WND_PROP_VISIBLE) < 1: break
     except: pass
