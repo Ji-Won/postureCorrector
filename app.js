@@ -5,6 +5,10 @@ const canvasCtx = canvasElement.getContext('2d');
 const recalibrateBtn = document.getElementById('recalibrateBtn');
 const alertBtn = document.getElementById('alertBtn'); 
 
+// Dashboard Elements
+const scoreVal = document.getElementById('scoreVal');
+const timeVal = document.getElementById('timeVal');
+
 // --- VARIABLES ---
 let calibrating = false;
 let calibrationStartTime = 0;
@@ -12,12 +16,45 @@ const calibrationDuration = 5000;
 let baselineRatios = [];
 let slouchThreshold = 0.0;
 
-// --- ALERT VARIABLES ---
+// Alert Variables
 let audioCtx;
 let alertsEnabled = false;
 let slouchStartTime = null;
-let lastBeepTime = 0; // NEW: Tracks when the last beep happened
+let lastBeepTime = 0; 
 let notificationSent = false;
+
+// --- NEW: METRICS VARIABLES ---
+let totalFramesTracked = 0;
+let goodFramesTracked = 0;
+let sessionStartTime = null;
+
+// --- NEW: CHART SETUP ---
+const chartCtx = document.getElementById('timelineChart').getContext('2d');
+let graphUpdateTimer = 0;
+let recentRatios = []; // Holds ratios over a 5-second window to average out the graph
+
+const postureChart = new Chart(chartCtx, {
+    type: 'line',
+    data: {
+        labels: [], // Time stamps
+        datasets: [{
+            label: 'Posture Ratio',
+            data: [],
+            borderColor: '#3498db',
+            backgroundColor: 'rgba(52, 152, 219, 0.2)',
+            borderWidth: 2,
+            fill: true,
+            tension: 0.4 // Gives it a smooth curve
+        }]
+    },
+    options: {
+        responsive: true,
+        scales: {
+            y: { min: 0.5, max: 1.0 } // Keeps the graph scale locked for consistency
+        },
+        plugins: { legend: { display: false } }
+    }
+});
 
 // Load saved threshold
 const savedThreshold = localStorage.getItem('postureThreshold');
@@ -28,7 +65,7 @@ if (savedThreshold !== null) {
     calibrationStartTime = Date.now();
 }
 
-// 2. Buttons
+// Buttons
 recalibrateBtn.addEventListener('click', () => {
     calibrating = true;
     calibrationStartTime = Date.now();
@@ -37,15 +74,12 @@ recalibrateBtn.addEventListener('click', () => {
 
 alertBtn.addEventListener('click', async () => {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    
     if ("Notification" in window) {
         const permission = await Notification.requestPermission();
         if (permission === "granted") {
             alertsEnabled = true;
             alertBtn.innerText = "Alerts Active";
             alertBtn.style.backgroundColor = "#27ae60"; 
-        } else {
-            alert("Notification permission denied by browser.");
         }
     }
 });
@@ -54,26 +88,19 @@ function playSoftBeep() {
     if (!audioCtx || audioCtx.state === 'suspended') return;
     const oscillator = audioCtx.createOscillator();
     const gainNode = audioCtx.createGain();
-    
     oscillator.type = 'sine';
     oscillator.frequency.setValueAtTime(440, audioCtx.currentTime); 
-    
     gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
     gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.0);
-    
     oscillator.connect(gainNode);
     gainNode.connect(audioCtx.destination);
-    
     oscillator.start();
     oscillator.stop(audioCtx.currentTime + 1.0);
 }
 
 function sendNotification() {
     if (Notification.permission === 'granted') {
-        new Notification("Posture Alert!", {
-            body: "You've been slouching for 10 seconds. Time to sit up!",
-            icon: "https://cdn-icons-png.flaticon.com/512/190/190411.png" 
-        });
+        new Notification("Posture Alert!", { body: "You've been slouching for 10 seconds. Time to sit up!" });
     }
 }
 
@@ -100,7 +127,6 @@ function onResults(results) {
             if (calibrating) {
                 baselineRatios.push(ratio);
                 const timeLeft = Math.ceil((calibrationDuration - (Date.now() - calibrationStartTime)) / 1000);
-                
                 canvasCtx.fillStyle = "#FFFF00";
                 canvasCtx.font = "30px Arial";
                 canvasCtx.fillText(`CALIBRATING: Sit straight! (${timeLeft}s)`, 20, 50);
@@ -110,53 +136,95 @@ function onResults(results) {
                     const avgBaseline = baselineRatios.reduce((a, b) => a + b, 0) / baselineRatios.length;
                     slouchThreshold = avgBaseline - 0.04; 
                     localStorage.setItem('postureThreshold', slouchThreshold.toString());
+                    
+                    // NEW: Dynamically adjust the graph's Y-axis to fit the user
+                    postureChart.options.scales.y.max = slouchThreshold + 0.2;
+                    postureChart.options.scales.y.min = slouchThreshold - 0.2;
+                    postureChart.update();
                 }
             } 
             else {
+                // --- METRICS TRACKING ---
+                if (!sessionStartTime) sessionStartTime = Date.now();
+                totalFramesTracked++;
+                recentRatios.push(ratio);
+
                 let status = "Good Posture";
                 canvasCtx.fillStyle = "#00FF00"; 
+                let isSlouching = false;
 
-                // --- UPDATED: RECURRING ALERT LOGIC ---
-                if (ratio < slouchThreshold) {
-                    status = "SLOUCHING!";
-                    canvasCtx.fillStyle = "#FF0000"; 
-                    
+                // --- SEVERITY TRACKING ---
+                if (ratio < (slouchThreshold - 0.04)) {
+                    // SEVERE SLOUCH (Drops deeply below the threshold)
+                    status = "SEVERE SLOUCH!";
+                    canvasCtx.fillStyle = "#FF0000"; // Red
+                    isSlouching = true;
+                } 
+                else if (ratio < slouchThreshold) {
+                    // WARNING (Just dipped below the threshold)
+                    status = "WARNING (Slight Slouch)";
+                    canvasCtx.fillStyle = "#FFA500"; // Orange
+                    isSlouching = true;
+                } 
+                else {
+                    // GOOD
+                    goodFramesTracked++;
+                }
+
+                // ALERT LOGIC
+                if (isSlouching) {
                     if (!slouchStartTime) {
                         slouchStartTime = Date.now(); 
-                        lastBeepTime = 0; // Reset beep tracker
-                        notificationSent = false;
+                        lastBeepTime = 0; notificationSent = false;
                     } else {
                         const slouchDuration = (Date.now() - slouchStartTime) / 1000; 
-                        
-                        // Initial Beep at 3 seconds
                         if (slouchDuration >= 3 && lastBeepTime === 0 && alertsEnabled) {
-                            playSoftBeep();
-                            lastBeepTime = Date.now();
+                            playSoftBeep(); lastBeepTime = Date.now();
                         }
-                        // Recurring Beep every 60 seconds (60000 ms)
                         else if (lastBeepTime > 0 && (Date.now() - lastBeepTime >= 60000) && alertsEnabled) {
-                            playSoftBeep();
-                            lastBeepTime = Date.now();
+                            playSoftBeep(); lastBeepTime = Date.now();
                         }
-                        
-                        // OS Notification at 10 seconds (still only happens once per slouch)
                         if (slouchDuration >= 10 && !notificationSent && alertsEnabled) {
-                            sendNotification();
-                            notificationSent = true;
+                            sendNotification(); notificationSent = true;
                         }
                     }
                 } else {
-                    // Reset all timers if posture is corrected
-                    slouchStartTime = null;
-                    lastBeepTime = 0;
-                    notificationSent = false;
+                    slouchStartTime = null; lastBeepTime = 0; notificationSent = false;
                 }
 
+                // DRAW CANVAS TEXT
                 canvasCtx.font = "30px Arial";
                 canvasCtx.fillText(`Status: ${status}`, 20, 50);
                 canvasCtx.fillStyle = "#FFFFFF"; 
                 canvasCtx.font = "20px Arial";
-                canvasCtx.fillText(`Ratio: ${ratio.toFixed(2)}`, 20, 90);
+                canvasCtx.fillText(`Ratio: ${ratio.toFixed(2)} (Target: ${slouchThreshold.toFixed(2)})`, 20, 90);
+
+                // --- UPDATE UI DASHBOARD ---
+                const scorePercentage = Math.round((goodFramesTracked / totalFramesTracked) * 100);
+                scoreVal.innerText = `${scorePercentage}%`;
+                
+                const minutesTracked = Math.floor((Date.now() - sessionStartTime) / 60000);
+                timeVal.innerText = `${minutesTracked}m`;
+
+                // --- UPDATE CHART EVERY 5 SECONDS ---
+                if (Date.now() - graphUpdateTimer > 5000) {
+                    // Get the average ratio over the last 5 seconds to smooth the line
+                    const avgRecentRatio = recentRatios.reduce((a, b) => a + b, 0) / recentRatios.length;
+                    
+                    const timeLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    postureChart.data.labels.push(timeLabel);
+                    postureChart.data.datasets[0].data.push(avgRecentRatio);
+
+                    // Keep only the last 20 data points on the graph so it doesn't get cluttered
+                    if (postureChart.data.labels.length > 20) {
+                        postureChart.data.labels.shift();
+                        postureChart.data.datasets[0].data.shift();
+                    }
+                    postureChart.update();
+                    
+                    graphUpdateTimer = Date.now();
+                    recentRatios = []; // Reset for the next 5 seconds
+                }
             }
         }
 
