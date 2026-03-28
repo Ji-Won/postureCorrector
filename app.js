@@ -23,20 +23,23 @@ let slouchStartTime = null;
 let lastBeepTime = 0; 
 let notificationSent = false;
 
-// --- NEW: METRICS VARIABLES ---
+// --- NEW: METRICS & CHART VARIABLES ---
 let totalFramesTracked = 0;
 let goodFramesTracked = 0;
 let sessionStartTime = null;
 
-// --- NEW: CHART SETUP ---
 const chartCtx = document.getElementById('timelineChart').getContext('2d');
+const timeScopeSelect = document.getElementById('timeScope');
 let graphUpdateTimer = 0;
-let recentRatios = []; // Holds ratios over a 5-second window to average out the graph
+let recentRatios = []; 
+
+// The Master Database for this session
+let sessionHistory = []; // Will store objects like: { timestamp: 1680000000, timeStr: "10:15", ratio: 0.85 }
 
 const postureChart = new Chart(chartCtx, {
     type: 'line',
     data: {
-        labels: [], // Time stamps
+        labels: [], 
         datasets: [{
             label: 'Posture Ratio',
             data: [],
@@ -44,17 +47,37 @@ const postureChart = new Chart(chartCtx, {
             backgroundColor: 'rgba(52, 152, 219, 0.2)',
             borderWidth: 2,
             fill: true,
-            tension: 0.4 // Gives it a smooth curve
+            tension: 0.4,
+            pointRadius: 0 // Hides the dots to make the line look smooth and professional
         }]
     },
     options: {
         responsive: true,
-        scales: {
-            y: { min: 0.5, max: 1.0 } // Keeps the graph scale locked for consistency
-        },
-        plugins: { legend: { display: false } }
+        maintainAspectRatio: false, // THIS FIXES THE SHRINKING BUG!
+        scales: { y: { min: 0.5, max: 1.0 } },
+        plugins: { legend: { display: false } },
+        animation: { duration: 0 } // Turns off bouncy animations for smoother live-updating
     }
 });
+
+// Re-draw the chart whenever the user changes the dropdown!
+timeScopeSelect.addEventListener('change', updateChartDisplay);
+
+function updateChartDisplay() {
+    const scopeVal = timeScopeSelect.value;
+    let filteredHistory = sessionHistory;
+    
+    // Filter the master array based on the selected time scope
+    if (scopeVal !== 'all') {
+        const cutoffTime = Date.now() - (parseInt(scopeVal) * 60 * 1000);
+        filteredHistory = sessionHistory.filter(dataPoint => dataPoint.timestamp >= cutoffTime);
+    }
+    
+    // Push the filtered data to the chart
+    postureChart.data.labels = filteredHistory.map(dataPoint => dataPoint.timeStr);
+    postureChart.data.datasets[0].data = filteredHistory.map(dataPoint => dataPoint.ratio);
+    postureChart.update();
+}
 
 // Load saved threshold
 const savedThreshold = localStorage.getItem('postureThreshold');
@@ -127,8 +150,7 @@ function onResults(results) {
             if (calibrating) {
                 baselineRatios.push(ratio);
                 const timeLeft = Math.ceil((calibrationDuration - (Date.now() - calibrationStartTime)) / 1000);
-                canvasCtx.fillStyle = "#FFFF00";
-                canvasCtx.font = "30px Arial";
+                canvasCtx.fillStyle = "#FFFF00"; canvasCtx.font = "30px Arial";
                 canvasCtx.fillText(`CALIBRATING: Sit straight! (${timeLeft}s)`, 20, 50);
 
                 if (Date.now() - calibrationStartTime > calibrationDuration) {
@@ -137,14 +159,12 @@ function onResults(results) {
                     slouchThreshold = avgBaseline - 0.04; 
                     localStorage.setItem('postureThreshold', slouchThreshold.toString());
                     
-                    // NEW: Dynamically adjust the graph's Y-axis to fit the user
                     postureChart.options.scales.y.max = slouchThreshold + 0.2;
                     postureChart.options.scales.y.min = slouchThreshold - 0.2;
                     postureChart.update();
                 }
             } 
             else {
-                // --- METRICS TRACKING ---
                 if (!sessionStartTime) sessionStartTime = Date.now();
                 totalFramesTracked++;
                 recentRatios.push(ratio);
@@ -153,35 +173,23 @@ function onResults(results) {
                 canvasCtx.fillStyle = "#00FF00"; 
                 let isSlouching = false;
 
-                // --- SEVERITY TRACKING ---
                 if (ratio < (slouchThreshold - 0.04)) {
-                    // SEVERE SLOUCH (Drops deeply below the threshold)
-                    status = "SEVERE SLOUCH!";
-                    canvasCtx.fillStyle = "#FF0000"; // Red
-                    isSlouching = true;
-                } 
-                else if (ratio < slouchThreshold) {
-                    // WARNING (Just dipped below the threshold)
-                    status = "WARNING (Slight Slouch)";
-                    canvasCtx.fillStyle = "#FFA500"; // Orange
-                    isSlouching = true;
-                } 
-                else {
-                    // GOOD
+                    status = "SEVERE SLOUCH!"; canvasCtx.fillStyle = "#FF0000"; isSlouching = true;
+                } else if (ratio < slouchThreshold) {
+                    status = "WARNING (Slight Slouch)"; canvasCtx.fillStyle = "#FFA500"; isSlouching = true;
+                } else {
                     goodFramesTracked++;
                 }
 
                 // ALERT LOGIC
                 if (isSlouching) {
                     if (!slouchStartTime) {
-                        slouchStartTime = Date.now(); 
-                        lastBeepTime = 0; notificationSent = false;
+                        slouchStartTime = Date.now(); lastBeepTime = 0; notificationSent = false;
                     } else {
                         const slouchDuration = (Date.now() - slouchStartTime) / 1000; 
                         if (slouchDuration >= 3 && lastBeepTime === 0 && alertsEnabled) {
                             playSoftBeep(); lastBeepTime = Date.now();
-                        }
-                        else if (lastBeepTime > 0 && (Date.now() - lastBeepTime >= 60000) && alertsEnabled) {
+                        } else if (lastBeepTime > 0 && (Date.now() - lastBeepTime >= 60000) && alertsEnabled) {
                             playSoftBeep(); lastBeepTime = Date.now();
                         }
                         if (slouchDuration >= 10 && !notificationSent && alertsEnabled) {
@@ -192,42 +200,42 @@ function onResults(results) {
                     slouchStartTime = null; lastBeepTime = 0; notificationSent = false;
                 }
 
-                // DRAW CANVAS TEXT
-                canvasCtx.font = "30px Arial";
-                canvasCtx.fillText(`Status: ${status}`, 20, 50);
-                canvasCtx.fillStyle = "#FFFFFF"; 
-                canvasCtx.font = "20px Arial";
+                canvasCtx.font = "30px Arial"; canvasCtx.fillText(`Status: ${status}`, 20, 50);
+                canvasCtx.fillStyle = "#FFFFFF"; canvasCtx.font = "20px Arial";
                 canvasCtx.fillText(`Ratio: ${ratio.toFixed(2)} (Target: ${slouchThreshold.toFixed(2)})`, 20, 90);
 
-                // --- UPDATE UI DASHBOARD ---
                 const scorePercentage = Math.round((goodFramesTracked / totalFramesTracked) * 100);
                 scoreVal.innerText = `${scorePercentage}%`;
-                
                 const minutesTracked = Math.floor((Date.now() - sessionStartTime) / 60000);
                 timeVal.innerText = `${minutesTracked}m`;
 
-                // --- UPDATE CHART EVERY 5 SECONDS ---
+                // --- UPDATED: THE MASTER DATABASE LOGIC ---
+                // Every 5 seconds, save the average ratio to our sessionHistory array
                 if (Date.now() - graphUpdateTimer > 5000) {
-                    // Get the average ratio over the last 5 seconds to smooth the line
                     const avgRecentRatio = recentRatios.reduce((a, b) => a + b, 0) / recentRatios.length;
+                    const now = Date.now();
+                    const timeLabel = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                     
-                    const timeLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                    postureChart.data.labels.push(timeLabel);
-                    postureChart.data.datasets[0].data.push(avgRecentRatio);
+                    // Save to master database
+                    sessionHistory.push({
+                        timestamp: now,
+                        timeStr: timeLabel,
+                        ratio: avgRecentRatio
+                    });
 
-                    // Keep only the last 20 data points on the graph so it doesn't get cluttered
-                    if (postureChart.data.labels.length > 20) {
-                        postureChart.data.labels.shift();
-                        postureChart.data.datasets[0].data.shift();
+                    // --- NEW: MEMORY CAP (Prevents Leaks) ---
+                    // 12 hours = 720 minutes = 8640 intervals of 5 seconds
+                    if (sessionHistory.length > 8640) {
+                        sessionHistory.shift(); // Toss the oldest data point
                     }
-                    postureChart.update();
+
+                    updateChartDisplay(); 
                     
                     graphUpdateTimer = Date.now();
-                    recentRatios = []; // Reset for the next 5 seconds
+                    recentRatios = [];
                 }
             }
         }
-
         drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#f57542', lineWidth: 4});
         drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#f542e6', lineWidth: 2, radius: 3});
     }
