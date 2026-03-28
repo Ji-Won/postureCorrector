@@ -23,7 +23,7 @@ let slouchStartTime = null;
 let lastBeepTime = 0; 
 let notificationSent = false;
 
-// --- NEW: METRICS & CHART VARIABLES ---
+// --- METRICS & CHART VARIABLES ---
 let totalFramesTracked = 0;
 let goodFramesTracked = 0;
 let sessionStartTime = null;
@@ -34,8 +34,9 @@ let graphUpdateTimer = 0;
 let recentRatios = []; 
 
 // The Master Database for this session
-let sessionHistory = []; // Will store objects like: { timestamp: 1680000000, timeStr: "10:15", ratio: 0.85 }
+let sessionHistory = []; 
 
+// Initialize Chart.js
 const postureChart = new Chart(chartCtx, {
     type: 'line',
     data: {
@@ -48,32 +49,30 @@ const postureChart = new Chart(chartCtx, {
             borderWidth: 2,
             fill: true,
             tension: 0.4,
-            pointRadius: 0 // Hides the dots to make the line look smooth and professional
+            pointRadius: 0 
         }]
     },
     options: {
         responsive: true,
-        maintainAspectRatio: false, // THIS FIXES THE SHRINKING BUG!
+        maintainAspectRatio: false, 
         scales: { y: { min: 0.5, max: 1.0 } },
         plugins: { legend: { display: false } },
-        animation: { duration: 0 } // Turns off bouncy animations for smoother live-updating
+        animation: { duration: 0 } 
     }
 });
 
-// Re-draw the chart whenever the user changes the dropdown!
+// 2. Event Listeners & Core Functions
 timeScopeSelect.addEventListener('change', updateChartDisplay);
 
 function updateChartDisplay() {
     const scopeVal = timeScopeSelect.value;
     let filteredHistory = sessionHistory;
     
-    // Filter the master array based on the selected time scope
     if (scopeVal !== 'all') {
         const cutoffTime = Date.now() - (parseInt(scopeVal) * 60 * 1000);
         filteredHistory = sessionHistory.filter(dataPoint => dataPoint.timestamp >= cutoffTime);
     }
     
-    // Push the filtered data to the chart
     postureChart.data.labels = filteredHistory.map(dataPoint => dataPoint.timeStr);
     postureChart.data.datasets[0].data = filteredHistory.map(dataPoint => dataPoint.ratio);
     postureChart.update();
@@ -83,12 +82,14 @@ function updateChartDisplay() {
 const savedThreshold = localStorage.getItem('postureThreshold');
 if (savedThreshold !== null) {
     slouchThreshold = parseFloat(savedThreshold);
+    postureChart.options.scales.y.max = slouchThreshold + 0.2;
+    postureChart.options.scales.y.min = slouchThreshold - 0.2;
+    postureChart.update();
 } else {
     calibrating = true;
     calibrationStartTime = Date.now();
 }
 
-// Buttons
 recalibrateBtn.addEventListener('click', () => {
     calibrating = true;
     calibrationStartTime = Date.now();
@@ -150,7 +151,8 @@ function onResults(results) {
             if (calibrating) {
                 baselineRatios.push(ratio);
                 const timeLeft = Math.ceil((calibrationDuration - (Date.now() - calibrationStartTime)) / 1000);
-                canvasCtx.fillStyle = "#FFFF00"; canvasCtx.font = "30px Arial";
+                canvasCtx.fillStyle = "#FFFF00"; 
+                canvasCtx.font = "30px Arial";
                 canvasCtx.fillText(`CALIBRATING: Sit straight! (${timeLeft}s)`, 20, 50);
 
                 if (Date.now() - calibrationStartTime > calibrationDuration) {
@@ -174,9 +176,13 @@ function onResults(results) {
                 let isSlouching = false;
 
                 if (ratio < (slouchThreshold - 0.04)) {
-                    status = "SEVERE SLOUCH!"; canvasCtx.fillStyle = "#FF0000"; isSlouching = true;
+                    status = "SEVERE SLOUCH!"; 
+                    canvasCtx.fillStyle = "#FF0000"; 
+                    isSlouching = true;
                 } else if (ratio < slouchThreshold) {
-                    status = "WARNING (Slight Slouch)"; canvasCtx.fillStyle = "#FFA500"; isSlouching = true;
+                    status = "WARNING (Slight Slouch)"; 
+                    canvasCtx.fillStyle = "#FFA500"; 
+                    isSlouching = true;
                 } else {
                     goodFramesTracked++;
                 }
@@ -184,24 +190,33 @@ function onResults(results) {
                 // ALERT LOGIC
                 if (isSlouching) {
                     if (!slouchStartTime) {
-                        slouchStartTime = Date.now(); lastBeepTime = 0; notificationSent = false;
+                        slouchStartTime = Date.now(); 
+                        lastBeepTime = 0; 
+                        notificationSent = false;
                     } else {
                         const slouchDuration = (Date.now() - slouchStartTime) / 1000; 
                         if (slouchDuration >= 3 && lastBeepTime === 0 && alertsEnabled) {
-                            playSoftBeep(); lastBeepTime = Date.now();
+                            playSoftBeep(); 
+                            lastBeepTime = Date.now();
                         } else if (lastBeepTime > 0 && (Date.now() - lastBeepTime >= 60000) && alertsEnabled) {
-                            playSoftBeep(); lastBeepTime = Date.now();
+                            playSoftBeep(); 
+                            lastBeepTime = Date.now();
                         }
                         if (slouchDuration >= 10 && !notificationSent && alertsEnabled) {
-                            sendNotification(); notificationSent = true;
+                            sendNotification(); 
+                            notificationSent = true;
                         }
                     }
                 } else {
-                    slouchStartTime = null; lastBeepTime = 0; notificationSent = false;
+                    slouchStartTime = null; 
+                    lastBeepTime = 0; 
+                    notificationSent = false;
                 }
 
-                canvasCtx.font = "30px Arial"; canvasCtx.fillText(`Status: ${status}`, 20, 50);
-                canvasCtx.fillStyle = "#FFFFFF"; canvasCtx.font = "20px Arial";
+                canvasCtx.font = "30px Arial"; 
+                canvasCtx.fillText(`Status: ${status}`, 20, 50);
+                canvasCtx.fillStyle = "#FFFFFF"; 
+                canvasCtx.font = "20px Arial";
                 canvasCtx.fillText(`Ratio: ${ratio.toFixed(2)} (Target: ${slouchThreshold.toFixed(2)})`, 20, 90);
 
                 const scorePercentage = Math.round((goodFramesTracked / totalFramesTracked) * 100);
@@ -209,30 +224,27 @@ function onResults(results) {
                 const minutesTracked = Math.floor((Date.now() - sessionStartTime) / 60000);
                 timeVal.innerText = `${minutesTracked}m`;
 
-                // --- UPDATED: THE MASTER DATABASE LOGIC ---
-                // Every 5 seconds, save the average ratio to our sessionHistory array
+                // --- MASTER DATABASE LOGIC ---
                 if (Date.now() - graphUpdateTimer > 5000) {
                     const avgRecentRatio = recentRatios.reduce((a, b) => a + b, 0) / recentRatios.length;
                     const now = Date.now();
                     const timeLabel = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                     
-                    // Save to master database
                     sessionHistory.push({
                         timestamp: now,
                         timeStr: timeLabel,
                         ratio: avgRecentRatio
                     });
 
-                    // --- NEW: MEMORY CAP (Prevents Leaks) ---
-                    // 12 hours = 720 minutes = 8640 intervals of 5 seconds
+                    // 12-hour memory cap
                     if (sessionHistory.length > 8640) {
-                        sessionHistory.shift(); // Toss the oldest data point
+                        sessionHistory.shift(); 
                     }
 
                     updateChartDisplay(); 
                     
                     graphUpdateTimer = Date.now();
-                    recentRatios = [];
+                    recentRatios = []; 
                 }
             }
         }
@@ -242,10 +254,20 @@ function onResults(results) {
     canvasCtx.restore();
 }
 
-// 4. Setup
+// 4. Setup MediaPipe & Camera
 const pose = new Pose({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
-pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5, selfieMode: true });
+pose.setOptions({ 
+    modelComplexity: 1, 
+    smoothLandmarks: true, 
+    minDetectionConfidence: 0.5, 
+    minTrackingConfidence: 0.5, 
+    selfieMode: true 
+});
 pose.onResults(onResults);
 
-const camera = new Camera(videoElement, { onFrame: async () => { await pose.send({image: videoElement}); }, width: 640, height: 480 });
+const camera = new Camera(videoElement, { 
+    onFrame: async () => { await pose.send({image: videoElement}); }, 
+    width: 640, 
+    height: 480 
+});
 camera.start();
