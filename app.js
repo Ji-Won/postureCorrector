@@ -10,7 +10,9 @@ const scoreVal = document.getElementById('scoreVal');
 const timeVal = document.getElementById('timeVal');
 
 // --- VARIABLES ---
-let calibrating = false;
+let appState = "calibrating"; // Can be: 'calibrating', 'tracking', 'stretching'
+const stretchBtn = document.getElementById('stretchBtn');
+
 let calibrationStartTime = 0;
 const calibrationDuration = 5000;
 let baselineRatios = [];
@@ -82,11 +84,12 @@ function updateChartDisplay() {
 const savedThreshold = localStorage.getItem('postureThreshold');
 if (savedThreshold !== null) {
     slouchThreshold = parseFloat(savedThreshold);
+    appState = "tracking";
     postureChart.options.scales.y.max = slouchThreshold + 0.2;
     postureChart.options.scales.y.min = slouchThreshold - 0.2;
     postureChart.update();
 } else {
-    calibrating = true;
+    appState = "calibrating";
     calibrationStartTime = Date.now();
 }
 
@@ -94,6 +97,18 @@ recalibrateBtn.addEventListener('click', () => {
     calibrating = true;
     calibrationStartTime = Date.now();
     baselineRatios = []; 
+});
+
+stretchBtn.addEventListener('click', () => {
+    if (appState !== "stretching") {
+        appState = "stretching";
+        stretchBtn.innerText = "Cancel Stretch";
+        stretchBtn.style.backgroundColor = "#c0392b"; // Turn red to cancel
+    } else {
+        appState = "tracking";
+        stretchBtn.innerText = "Start Stretch Break";
+        stretchBtn.style.backgroundColor = "#9b59b6"; // Turn back to purple
+    }
 });
 
 alertBtn.addEventListener('click', async () => {
@@ -148,7 +163,7 @@ function onResults(results) {
         if (shoulderWidth > 0) {
             const ratio = neckHeight / shoulderWidth;
 
-            if (calibrating) {
+            if (appState === "calibrating") {
                 baselineRatios.push(ratio);
                 const timeLeft = Math.ceil((calibrationDuration - (Date.now() - calibrationStartTime)) / 1000);
                 canvasCtx.fillStyle = "#FFFF00"; 
@@ -156,7 +171,7 @@ function onResults(results) {
                 canvasCtx.fillText(`CALIBRATING: Sit straight! (${timeLeft}s)`, 20, 50);
 
                 if (Date.now() - calibrationStartTime > calibrationDuration) {
-                    calibrating = false;
+                    appState = "tracking"; // Automatically switch to tracking when done!
                     const avgBaseline = baselineRatios.reduce((a, b) => a + b, 0) / baselineRatios.length;
                     slouchThreshold = avgBaseline - 0.04; 
                     localStorage.setItem('postureThreshold', slouchThreshold.toString());
@@ -166,7 +181,9 @@ function onResults(results) {
                     postureChart.update();
                 }
             } 
-            else {
+            // --- STATE 2: ACTIVE TRACKING ---
+            else if (appState === "tracking") {
+                // (Keep all your existing metrics, alerts, and master database logic here!)
                 if (!sessionStartTime) sessionStartTime = Date.now();
                 totalFramesTracked++;
                 recentRatios.push(ratio);
@@ -187,36 +204,19 @@ function onResults(results) {
                     goodFramesTracked++;
                 }
 
-                // ALERT LOGIC
                 if (isSlouching) {
                     if (!slouchStartTime) {
-                        slouchStartTime = Date.now(); 
-                        lastBeepTime = 0; 
-                        notificationSent = false;
+                        slouchStartTime = Date.now(); lastBeepTime = 0; notificationSent = false;
                     } else {
                         const slouchDuration = (Date.now() - slouchStartTime) / 1000; 
-                        if (slouchDuration >= 3 && lastBeepTime === 0 && alertsEnabled) {
-                            playSoftBeep(); 
-                            lastBeepTime = Date.now();
-                        } else if (lastBeepTime > 0 && (Date.now() - lastBeepTime >= 60000) && alertsEnabled) {
-                            playSoftBeep(); 
-                            lastBeepTime = Date.now();
-                        }
-                        if (slouchDuration >= 10 && !notificationSent && alertsEnabled) {
-                            sendNotification(); 
-                            notificationSent = true;
-                        }
+                        if (slouchDuration >= 3 && lastBeepTime === 0 && alertsEnabled) { playSoftBeep(); lastBeepTime = Date.now(); }
+                        else if (lastBeepTime > 0 && (Date.now() - lastBeepTime >= 60000) && alertsEnabled) { playSoftBeep(); lastBeepTime = Date.now(); }
+                        if (slouchDuration >= 10 && !notificationSent && alertsEnabled) { sendNotification(); notificationSent = true; }
                     }
-                } else {
-                    slouchStartTime = null; 
-                    lastBeepTime = 0; 
-                    notificationSent = false;
-                }
+                } else { slouchStartTime = null; lastBeepTime = 0; notificationSent = false; }
 
-                canvasCtx.font = "30px Arial"; 
-                canvasCtx.fillText(`Status: ${status}`, 20, 50);
-                canvasCtx.fillStyle = "#FFFFFF"; 
-                canvasCtx.font = "20px Arial";
+                canvasCtx.font = "30px Arial"; canvasCtx.fillText(`Status: ${status}`, 20, 50);
+                canvasCtx.fillStyle = "#FFFFFF"; canvasCtx.font = "20px Arial";
                 canvasCtx.fillText(`Ratio: ${ratio.toFixed(2)} (Target: ${slouchThreshold.toFixed(2)})`, 20, 90);
 
                 const scorePercentage = Math.round((goodFramesTracked / totalFramesTracked) * 100);
@@ -224,28 +224,33 @@ function onResults(results) {
                 const minutesTracked = Math.floor((Date.now() - sessionStartTime) / 60000);
                 timeVal.innerText = `${minutesTracked}m`;
 
-                // --- MASTER DATABASE LOGIC ---
                 if (Date.now() - graphUpdateTimer > 5000) {
                     const avgRecentRatio = recentRatios.reduce((a, b) => a + b, 0) / recentRatios.length;
                     const now = Date.now();
                     const timeLabel = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                    
-                    sessionHistory.push({
-                        timestamp: now,
-                        timeStr: timeLabel,
-                        ratio: avgRecentRatio
-                    });
-
-                    // 12-hour memory cap
-                    if (sessionHistory.length > 8640) {
-                        sessionHistory.shift(); 
-                    }
-
+                    sessionHistory.push({ timestamp: now, timeStr: timeLabel, ratio: avgRecentRatio });
+                    if (sessionHistory.length > 8640) sessionHistory.shift(); 
                     updateChartDisplay(); 
-                    
-                    graphUpdateTimer = Date.now();
-                    recentRatios = []; 
+                    graphUpdateTimer = Date.now(); recentRatios = []; 
                 }
+            }
+            // --- STATE 3: STRETCH MODE (NEW!) ---
+            else if (appState === "stretching") {
+                // Dim the background slightly to show we are in a different mode
+                canvasCtx.fillStyle = "rgba(0, 0, 0, 0.5)";
+                canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+
+                canvasCtx.fillStyle = "#9b59b6"; // Purple text
+                canvasCtx.font = "bold 40px Arial";
+                canvasCtx.textAlign = "center"; // Center the text easily
+                canvasCtx.fillText("STRETCH MODE ACTIVE", canvasElement.width / 2, canvasElement.height / 2);
+                
+                canvasCtx.fillStyle = "#FFFFFF";
+                canvasCtx.font = "20px Arial";
+                canvasCtx.fillText("(Stretch geometry logic goes here!)", canvasElement.width / 2, canvasElement.height / 2 + 40);
+                
+                // Reset text alignment so it doesn't break our tracking UI later
+                canvasCtx.textAlign = "left"; 
             }
         }
         drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#f57542', lineWidth: 4});
