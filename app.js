@@ -130,6 +130,7 @@ stretchBtn.addEventListener('click', () => {
         appState = "tracking";
         stretchBtn.innerText = "Start Stretch Break";
         stretchBtn.style.backgroundColor = "#9b59b6"; 
+        setProgressHum(false);
     }
 });
 
@@ -159,23 +160,73 @@ function playSoftBeep() {
     oscillator.stop(audioCtx.currentTime + 1.0);
 }
 
-// --- NEW: SUCCESS DING (Airplane Seatbelt Sound) ---
+// --- SUCCESS DING (Airplane Seatbelt Sound) ---
 function playSuccessDing() {
     if (!audioCtx || audioCtx.state === 'suspended') return;
     const oscillator = audioCtx.createOscillator();
     const gainNode = audioCtx.createGain();
     
     oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(600, audioCtx.currentTime); // 600Hz is a classic pleasant chime
+    oscillator.frequency.setValueAtTime(600, audioCtx.currentTime); 
     
     gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5); // Smooth fade out
+    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5); 
     
     oscillator.connect(gainNode);
     gainNode.connect(audioCtx.destination);
     
     oscillator.start();
     oscillator.stop(audioCtx.currentTime + 1.5);
+}
+
+// --- ETHEREAL PROGRESS HUM (Relaxation / Ocean Vibe) ---
+let oscBase = null, oscFifth = null, oscOctave = null;
+let progressGainNode = null;
+let isHumming = false;
+
+function setProgressHum(active) {
+    if (!audioCtx || audioCtx.state === 'suspended') return;
+    
+    // Create the ambient chord generators the first time
+    if (!oscBase) {
+        progressGainNode = audioCtx.createGain();
+        progressGainNode.gain.setValueAtTime(0, audioCtx.currentTime); 
+
+        // Base note (Deep C3)
+        oscBase = audioCtx.createOscillator(); 
+        oscBase.type = 'sine'; 
+        oscBase.frequency.value = 130.81; 
+        
+        // Perfect Fifth (Soothing G3)
+        oscFifth = audioCtx.createOscillator(); 
+        oscFifth.type = 'sine'; 
+        oscFifth.frequency.value = 196.00; 
+
+        // Octave up (Ethereal C4)
+        oscOctave = audioCtx.createOscillator(); 
+        oscOctave.type = 'sine'; 
+        oscOctave.frequency.value = 261.63; 
+
+        // Connect all three notes to the same master volume control
+        oscBase.connect(progressGainNode);
+        oscFifth.connect(progressGainNode);
+        oscOctave.connect(progressGainNode);
+        progressGainNode.connect(audioCtx.destination);
+
+        oscBase.start(); 
+        oscFifth.start(); 
+        oscOctave.start();
+    }
+
+    if (active && !isHumming) {
+        // Time constant of 1.5 creates a slow, rolling "ocean wave" fade-in
+        progressGainNode.gain.setTargetAtTime(0.15, audioCtx.currentTime, 1.5); 
+        isHumming = true;
+    } else if (!active && isHumming) {
+        // Fades out gently like water receding from the sand
+        progressGainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.5); 
+        isHumming = false;
+    }
 }
 
 function sendNotification() {
@@ -500,6 +551,14 @@ function onResults(results) {
                     canvasCtx.fillText("WORKOUT COMPLETE!", canvasElement.width / 2, canvasElement.height / 2);
                     canvasCtx.font = "20px Arial"; canvasCtx.fillStyle = "#FFFFFF";
                     canvasCtx.fillText("Click 'Cancel Stretch' to resume tracking", canvasElement.width / 2, canvasElement.height / 2 + 50);
+                }
+
+                // === PROGRESS HUM CONTROLLER ===
+                // If we are in a holding phase (not shrugs, not victory) AND the timer is running...
+                if (stretchPhase !== 2 && stretchPhase !== 6 && stretchStartTime !== null) {
+                    setProgressHum(true); // Turn the EV engine on!
+                } else {
+                    setProgressHum(false); // Fade it out
                 }
 
                 canvasCtx.textAlign = "left"; 
