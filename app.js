@@ -39,10 +39,14 @@ let recentRatios = [];
 let sessionHistory = []; 
 
 // Stretch Routine Variables
+let stretchPhase = 0; // 0: Neck, 1: Shrugs, 2: Twist, 3: Victory
 let stretchStartTime = null;
 let accumulatedStretchTime = 0;
-const targetStretchTime = 5000; // 5 seconds for the prototype
-let stretchCompleted = false;
+const targetStretchTime = 5000; // 5 seconds for holds
+
+let shrugReps = 0;
+const targetShrugReps = 5;
+let isCurrentlyShrugging = false; // Prevents the AI from double-counting a single shrug
 
 // Initialize Chart.js
 const postureChart = new Chart(chartCtx, {
@@ -109,16 +113,19 @@ stretchBtn.addEventListener('click', () => {
     if (appState !== "stretching") {
         appState = "stretching";
         stretchBtn.innerText = "Cancel Stretch";
-        stretchBtn.style.backgroundColor = "#c0392b"; // Turn red to cancel
-
-        //reset the stretch every time you enter the mode
+        stretchBtn.style.backgroundColor = "#c0392b"; 
+        
+        // Reset the entire workout routine
+        stretchPhase = 0;
         accumulatedStretchTime = 0;
         stretchStartTime = null;
-        stretchCompleted = false;
+        shrugReps = 0;
+        isCurrentlyShrugging = false;
+        
     } else {
         appState = "tracking";
         stretchBtn.innerText = "Start Stretch Break";
-        stretchBtn.style.backgroundColor = "#9b59b6"; // Turn back to purple
+        stretchBtn.style.backgroundColor = "#9b59b6"; 
     }
 });
 
@@ -247,76 +254,125 @@ function onResults(results) {
             }
             // --- STATE 3: STRETCH MODE ---
             else if (appState === "stretching") {
-                // Dim the video slightly to make the UI pop
                 canvasCtx.fillStyle = "rgba(0, 0, 0, 0.7)";
                 canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
-                if (stretchCompleted) {
-                    // VICTORY SCREEN
-                    canvasCtx.fillStyle = "#f1c40f"; // Gold
-                    canvasCtx.font = "bold 50px Arial";
-                    canvasCtx.textAlign = "center";
-                    canvasCtx.fillText("STRETCH COMPLETE!", canvasElement.width / 2, canvasElement.height / 2);
-                    canvasCtx.font = "20px Arial";
-                    canvasCtx.fillStyle = "#FFFFFF";
-                    canvasCtx.fillText("Click 'Cancel Stretch' to resume tracking", canvasElement.width / 2, canvasElement.height / 2 + 50);
-                } 
-                else {
-                    // 1. Check the Geometry (Are they tilting their head?)
+                canvasCtx.textAlign = "center";
+
+                // === PHASE 0: NECK TILT ===
+                if (stretchPhase === 0) {
                     const earTiltMagnitude = Math.abs(leftEarY - rightEarY);
-                    const isTilting = earTiltMagnitude > 0.06; // 0.06 is the "tilt threshold"
+                    const isTilting = earTiltMagnitude > 0.05; 
 
-                    let instruction = "Tilt your head to either side!";
-                    let barColor = "#e74c3c"; // Red (Not stretching)
+                    let instruction = "Tilt your head to the side!";
+                    let barColor = "#e74c3c"; 
 
-                    // 2. The Play/Pause Timer Logic
                     if (isTilting) {
                         instruction = "Hold it right there!";
-                        barColor = "#2ecc71"; // Green (Stretching!)
-                        
-                        // If they just started tilting, mark the time
+                        barColor = "#2ecc71"; 
                         if (!stretchStartTime) stretchStartTime = Date.now();
-                        
-                        // Add the time elapsed since the last frame to the total
                         accumulatedStretchTime += (Date.now() - stretchStartTime);
-                        stretchStartTime = Date.now(); // Reset for the next frame
-                    } else {
-                        // If they stop tilting, pause the timer
-                        stretchStartTime = null; 
-                    }
+                        stretchStartTime = Date.now(); 
+                    } else { stretchStartTime = null; }
 
-                    // Calculate Progress Percentage (0.0 to 1.0)
                     let progressPct = accumulatedStretchTime / targetStretchTime;
                     if (progressPct >= 1.0) {
-                        progressPct = 1.0;
-                        stretchCompleted = true; // They did it!
+                        // Move to Phase 1!
+                        stretchPhase = 1; 
+                        accumulatedStretchTime = 0; 
+                        stretchStartTime = null;
+                    } else {
+                        canvasCtx.fillStyle = "#FFFFFF"; canvasCtx.font = "bold 35px Arial";
+                        canvasCtx.fillText("1/3: Neck Stretch", canvasElement.width / 2, 80);
+                        canvasCtx.font = "24px Arial"; canvasCtx.fillStyle = barColor;
+                        canvasCtx.fillText(instruction, canvasElement.width / 2, 120);
+
+                        // Progress Bar
+                        const barWidth = 400; const barHeight = 30;
+                        const barX = (canvasElement.width - barWidth) / 2;
+                        canvasCtx.fillStyle = "#333333"; canvasCtx.fillRect(barX, 150, barWidth, barHeight);
+                        canvasCtx.fillStyle = barColor; canvasCtx.fillRect(barX, 150, barWidth * progressPct, barHeight);
+                    }
+                }
+                
+                // === PHASE 1: SHOULDER SHRUGS ===
+                else if (stretchPhase === 1) {
+                    // Shrugging brings shoulders very close to the ears, making neckHeight tiny
+                    const isShrugging = neckHeight < 0.24; 
+                    
+                    let instruction = "Shrug your shoulders UP!";
+                    let textColor = "#e74c3c";
+
+                    if (isShrugging) {
+                        instruction = "Drop them DOWN!";
+                        textColor = "#2ecc71";
+                        if (!isCurrentlyShrugging) {
+                            isCurrentlyShrugging = true;
+                            shrugReps++; // Count the rep!
+                        }
+                    } else {
+                        isCurrentlyShrugging = false; // Reset the trigger when they drop their shoulders
                     }
 
-                    // 3. Draw the Gamified UI
-                    canvasCtx.textAlign = "center";
-                    
-                    canvasCtx.fillStyle = "#FFFFFF";
-                    canvasCtx.font = "bold 35px Arial";
-                    canvasCtx.fillText("Neck Stretch", canvasElement.width / 2, 80);
-                    
-                    canvasCtx.font = "24px Arial";
-                    canvasCtx.fillStyle = barColor;
-                    canvasCtx.fillText(instruction, canvasElement.width / 2, 120);
-
-                    // Draw Progress Bar Background (Dark Grey)
-                    const barWidth = 400;
-                    const barHeight = 30;
-                    const barX = (canvasElement.width - barWidth) / 2;
-                    const barY = 150;
-                    canvasCtx.fillStyle = "#333333";
-                    canvasCtx.fillRect(barX, barY, barWidth, barHeight);
-
-                    // Draw Progress Bar Fill (Dynamic Color)
-                    canvasCtx.fillStyle = barColor;
-                    canvasCtx.fillRect(barX, barY, barWidth * progressPct, barHeight);
+                    if (shrugReps >= targetShrugReps) {
+                        // Move to Phase 2!
+                        stretchPhase = 2;
+                    } else {
+                        canvasCtx.fillStyle = "#FFFFFF"; canvasCtx.font = "bold 35px Arial";
+                        canvasCtx.fillText("2/3: Shoulder Shrugs", canvasElement.width / 2, 80);
+                        canvasCtx.font = "24px Arial"; canvasCtx.fillStyle = textColor;
+                        canvasCtx.fillText(instruction, canvasElement.width / 2, 120);
+                        
+                        // Rep Counter UI
+                        canvasCtx.font = "bold 50px Arial"; canvasCtx.fillStyle = "#3498db";
+                        canvasCtx.fillText(`${shrugReps} / ${targetShrugReps}`, canvasElement.width / 2, 190);
+                    }
                 }
 
-                canvasCtx.textAlign = "left"; // Reset text alignment for the rest of the app 
+                // === PHASE 2: TORSO TWIST ===
+                else if (stretchPhase === 2) {
+                    // Twisting your body makes your shoulders appear to overlap on the 2D camera
+                    const isTwisting = shoulderWidth < 0.15; 
+                    
+                    let instruction = "Twist your torso to either side!";
+                    let barColor = "#e74c3c"; 
+
+                    if (isTwisting) {
+                        instruction = "Hold the twist!";
+                        barColor = "#2ecc71"; 
+                        if (!stretchStartTime) stretchStartTime = Date.now();
+                        accumulatedStretchTime += (Date.now() - stretchStartTime);
+                        stretchStartTime = Date.now(); 
+                    } else { stretchStartTime = null; }
+
+                    let progressPct = accumulatedStretchTime / targetStretchTime;
+                    if (progressPct >= 1.0) {
+                        // Move to Victory Screen!
+                        stretchPhase = 3; 
+                    } else {
+                        canvasCtx.fillStyle = "#FFFFFF"; canvasCtx.font = "bold 35px Arial";
+                        canvasCtx.fillText("3/3: Torso Twist", canvasElement.width / 2, 80);
+                        canvasCtx.font = "24px Arial"; canvasCtx.fillStyle = barColor;
+                        canvasCtx.fillText(instruction, canvasElement.width / 2, 120);
+
+                        // Progress Bar
+                        const barWidth = 400; const barHeight = 30;
+                        const barX = (canvasElement.width - barWidth) / 2;
+                        canvasCtx.fillStyle = "#333333"; canvasCtx.fillRect(barX, 150, barWidth, barHeight);
+                        canvasCtx.fillStyle = barColor; canvasCtx.fillRect(barX, 150, barWidth * progressPct, barHeight);
+                    }
+                }
+
+                // === PHASE 3: VICTORY ===
+                else if (stretchPhase === 3) {
+                    canvasCtx.fillStyle = "#f1c40f"; 
+                    canvasCtx.font = "bold 50px Arial";
+                    canvasCtx.fillText("WORKOUT COMPLETE!", canvasElement.width / 2, canvasElement.height / 2);
+                    canvasCtx.font = "20px Arial"; canvasCtx.fillStyle = "#FFFFFF";
+                    canvasCtx.fillText("Click 'Cancel Stretch' to resume tracking", canvasElement.width / 2, canvasElement.height / 2 + 50);
+                }
+
+                canvasCtx.textAlign = "left"; // Reset text alignment
             }
         }
         drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#f57542', lineWidth: 4});
