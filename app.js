@@ -39,14 +39,15 @@ let recentRatios = [];
 let sessionHistory = []; 
 
 // Stretch Routine Variables
-let stretchPhase = 0; // 0: Neck L, 1: Neck R, 2: Shrugs, 3: Twist 1, 4: Center Reset, 5: Twist 2, 6: Victory
+let stretchPhase = 0; // 0: Neck 1, 1: Neck 2, 2: Shrugs, 3: Twist 1, 4: Center Reset, 5: Twist 2, 6: Victory
 let stretchStartTime = null;
 let accumulatedStretchTime = 0;
-const targetStretchTime = 5000; // 5 seconds for holds
+const targetStretchTime = 5000; 
 
 let shrugReps = 0;
 const targetShrugReps = 5;
-let isCurrentlyShrugging = false;
+let isCurrentlyShrugging = false; 
+let firstTiltLandmark = null; // Smartly adapts to mirrored cameras
 
 // Initialize Chart.js
 const postureChart = new Chart(chartCtx, {
@@ -124,6 +125,7 @@ stretchBtn.addEventListener('click', () => {
         stretchStartTime = null;
         shrugReps = 0;
         isCurrentlyShrugging = false;
+        firstTiltLandmark = null; // Reset the smart memory
     } else {
         appState = "tracking";
         stretchBtn.innerText = "Start Stretch Break";
@@ -277,19 +279,62 @@ function onResults(results) {
             else if (appState === "stretching") {
                 canvasCtx.fillStyle = "rgba(0, 0, 0, 0.7)";
                 canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
-                canvasCtx.textAlign = "center";
 
+                // --- AR HOLOGRAPHIC GUIDES ---
+                const cw = canvasElement.width;
+                const ch = canvasElement.height;
+                const lEarX = landmarks[7].x * cw, lEarY = landmarks[7].y * ch;
+                const rEarX = landmarks[8].x * cw, rEarY = landmarks[8].y * ch;
+                const lShldrX = landmarks[11].x * cw, lShldrY = landmarks[11].y * ch;
+                const rShldrX = landmarks[12].x * cw, rShldrY = landmarks[12].y * ch;
+
+                canvasCtx.lineWidth = 5;
+                canvasCtx.setLineDash([10, 10]); // Dotted line effect
+
+                if (stretchPhase === 0 || stretchPhase === 1) {
+                    canvasCtx.strokeStyle = "#3498db"; 
+                    // Only draw the required guide line!
+                    if (stretchPhase === 0 || (stretchPhase === 1 && firstTiltLandmark === '8')) {
+                        canvasCtx.beginPath(); canvasCtx.moveTo(lEarX, lEarY); canvasCtx.lineTo(lShldrX, lShldrY); canvasCtx.stroke();
+                    }
+                    if (stretchPhase === 0 || (stretchPhase === 1 && firstTiltLandmark === '7')) {
+                        canvasCtx.beginPath(); canvasCtx.moveTo(rEarX, rEarY); canvasCtx.lineTo(rShldrX, rShldrY); canvasCtx.stroke();
+                    }
+                } else if (stretchPhase === 2) {
+                    canvasCtx.strokeStyle = "#e67e22";
+                    canvasCtx.beginPath(); canvasCtx.moveTo(lShldrX, lShldrY); canvasCtx.lineTo(lShldrX, lShldrY - 100); canvasCtx.stroke();
+                    canvasCtx.beginPath(); canvasCtx.moveTo(rShldrX, rShldrY); canvasCtx.lineTo(rShldrX, rShldrY - 100); canvasCtx.stroke();
+                } else if (stretchPhase === 3 || stretchPhase === 5) {
+                    canvasCtx.strokeStyle = "#9b59b6";
+                    canvasCtx.beginPath(); canvasCtx.moveTo(lShldrX, lShldrY); canvasCtx.lineTo(rShldrX, rShldrY); canvasCtx.stroke();
+                }
+                canvasCtx.setLineDash([]); 
+
+                // --- UI DRAWING ---
+                canvasCtx.textAlign = "center";
                 const barWidth = 400; const barHeight = 30;
                 const barX = (canvasElement.width - barWidth) / 2;
 
-                // === PHASE 0: NECK TILT (LEFT) ===
+                // === PHASE 0: NECK TILT (ANY SIDE) ===
                 if (stretchPhase === 0) {
-                    const isTiltingLeft = (rightEarY - leftEarY) > 0.05; 
-                    let instruction = "Tilt your head LEFT!";
-                    let barColor = isTiltingLeft ? "#2ecc71" : "#e74c3c"; 
+                    let isTilting = false;
+                    let droppedLandmark = null;
 
-                    if (isTiltingLeft) {
-                        instruction = "Hold it right there!";
+                    if ((leftEarY - rightEarY) > 0.05) { isTilting = true; droppedLandmark = '7'; }
+                    else if ((rightEarY - leftEarY) > 0.05) { isTilting = true; droppedLandmark = '8'; }
+
+                    let instruction = "Drop ONE ear to your shoulder!";
+                    let subtext = "(Follow the blue lines!)";
+                    let barColor = isTilting ? "#2ecc71" : "#e74c3c"; 
+
+                    if (isTilting) {
+                        // Dynamically calculate "LEFT" or "RIGHT" based purely on screen geometry!
+                        let sideWord = "";
+                        if (droppedLandmark === '7') sideWord = (lEarX < rEarX) ? "LEFT" : "RIGHT";
+                        if (droppedLandmark === '8') sideWord = (rEarX < lEarX) ? "LEFT" : "RIGHT";
+
+                        instruction = `Hold that ${sideWord} stretch!`; 
+                        subtext = "Keep stretching...";
                         if (!stretchStartTime) stretchStartTime = Date.now();
                         accumulatedStretchTime += (Date.now() - stretchStartTime);
                         stretchStartTime = Date.now(); 
@@ -297,25 +342,38 @@ function onResults(results) {
 
                     let progressPct = Math.min(accumulatedStretchTime / targetStretchTime, 1.0);
                     if (progressPct >= 1.0) {
-                        playSuccessDing(); // DING!
+                        firstTiltLandmark = droppedLandmark; // Save the internal ID, not the word!
+                        playSuccessDing(); 
                         stretchPhase = 1; accumulatedStretchTime = 0; stretchStartTime = null;
                     } else {
                         canvasCtx.fillStyle = "#FFFFFF"; canvasCtx.font = "bold 35px Arial";
-                        canvasCtx.fillText("1/5: Left Neck Stretch", canvasElement.width / 2, 80);
+                        canvasCtx.fillText("1/5: First Neck Stretch", canvasElement.width / 2, 60);
                         canvasCtx.font = "24px Arial"; canvasCtx.fillStyle = barColor;
-                        canvasCtx.fillText(instruction, canvasElement.width / 2, 120);
+                        canvasCtx.fillText(instruction, canvasElement.width / 2, 100);
+                        canvasCtx.font = "18px Arial"; canvasCtx.fillStyle = "#bdc3c7";
+                        canvasCtx.fillText(subtext, canvasElement.width / 2, 130);
                         canvasCtx.fillStyle = "#333333"; canvasCtx.fillRect(barX, 150, barWidth, barHeight);
                         canvasCtx.fillStyle = barColor; canvasCtx.fillRect(barX, 150, barWidth * progressPct, barHeight);
                     }
                 }
                 
-                // === PHASE 1: NECK TILT (RIGHT) ===
+                // === PHASE 1: NECK TILT (OPPOSITE SIDE) ===
                 else if (stretchPhase === 1) {
-                    const isTiltingRight = (leftEarY - rightEarY) > 0.05; 
-                    let instruction = "Now tilt your head RIGHT!";
-                    let barColor = isTiltingRight ? "#2ecc71" : "#e74c3c"; 
+                    let isTilting = false;
+                    const requiredLandmark = (firstTiltLandmark === '7') ? '8' : '7';
+                    
+                    // Dynamically calculate the word for the opposite side
+                    let requiredWord = "";
+                    if (requiredLandmark === '7') requiredWord = (lEarX < rEarX) ? "LEFT" : "RIGHT";
+                    if (requiredLandmark === '8') requiredWord = (rEarX < lEarX) ? "LEFT" : "RIGHT";
 
-                    if (isTiltingRight) {
+                    if (requiredLandmark === '7') { isTilting = (leftEarY - rightEarY) > 0.05; } 
+                    else { isTilting = (rightEarY - leftEarY) > 0.05; }
+
+                    let instruction = `Now drop your ${requiredWord} ear!`;
+                    let barColor = isTilting ? "#2ecc71" : "#e74c3c"; 
+
+                    if (isTilting) {
                         instruction = "Hold it right there!";
                         if (!stretchStartTime) stretchStartTime = Date.now();
                         accumulatedStretchTime += (Date.now() - stretchStartTime);
@@ -324,13 +382,13 @@ function onResults(results) {
 
                     let progressPct = Math.min(accumulatedStretchTime / targetStretchTime, 1.0);
                     if (progressPct >= 1.0) {
-                        playSuccessDing(); // DING!
+                        playSuccessDing(); 
                         stretchPhase = 2; accumulatedStretchTime = 0; stretchStartTime = null;
                     } else {
                         canvasCtx.fillStyle = "#FFFFFF"; canvasCtx.font = "bold 35px Arial";
-                        canvasCtx.fillText("2/5: Right Neck Stretch", canvasElement.width / 2, 80);
+                        canvasCtx.fillText("2/5: Opposite Neck Stretch", canvasElement.width / 2, 60);
                         canvasCtx.font = "24px Arial"; canvasCtx.fillStyle = barColor;
-                        canvasCtx.fillText(instruction, canvasElement.width / 2, 120);
+                        canvasCtx.fillText(instruction, canvasElement.width / 2, 100);
                         canvasCtx.fillStyle = "#333333"; canvasCtx.fillRect(barX, 150, barWidth, barHeight);
                         canvasCtx.fillStyle = barColor; canvasCtx.fillRect(barX, 150, barWidth * progressPct, barHeight);
                     }
@@ -348,15 +406,14 @@ function onResults(results) {
                     } else { isCurrentlyShrugging = false; }
 
                     if (shrugReps >= targetShrugReps) {
-                        playSuccessDing(); // DING!
-                        stretchPhase = 3;
+                        playSuccessDing(); stretchPhase = 3;
                     } else {
                         canvasCtx.fillStyle = "#FFFFFF"; canvasCtx.font = "bold 35px Arial";
-                        canvasCtx.fillText("3/5: Shoulder Shrugs", canvasElement.width / 2, 80);
+                        canvasCtx.fillText("3/5: Shoulder Shrugs", canvasElement.width / 2, 60);
                         canvasCtx.font = "24px Arial"; canvasCtx.fillStyle = textColor;
-                        canvasCtx.fillText(instruction, canvasElement.width / 2, 120);
+                        canvasCtx.fillText(instruction, canvasElement.width / 2, 100);
                         canvasCtx.font = "bold 50px Arial"; canvasCtx.fillStyle = "#3498db";
-                        canvasCtx.fillText(`${shrugReps} / ${targetShrugReps}`, canvasElement.width / 2, 190);
+                        canvasCtx.fillText(`${shrugReps} / ${targetShrugReps}`, canvasElement.width / 2, 170);
                     }
                 }
 
@@ -375,13 +432,12 @@ function onResults(results) {
 
                     let progressPct = Math.min(accumulatedStretchTime / targetStretchTime, 1.0);
                     if (progressPct >= 1.0) {
-                        playSuccessDing(); // DING!
-                        stretchPhase = 4; accumulatedStretchTime = 0; stretchStartTime = null;
+                        playSuccessDing(); stretchPhase = 4; accumulatedStretchTime = 0; stretchStartTime = null;
                     } else {
                         canvasCtx.fillStyle = "#FFFFFF"; canvasCtx.font = "bold 35px Arial";
-                        canvasCtx.fillText("4/5: Torso Twist", canvasElement.width / 2, 80);
+                        canvasCtx.fillText("4/5: Torso Twist", canvasElement.width / 2, 60);
                         canvasCtx.font = "24px Arial"; canvasCtx.fillStyle = barColor;
-                        canvasCtx.fillText(instruction, canvasElement.width / 2, 120);
+                        canvasCtx.fillText(instruction, canvasElement.width / 2, 100);
                         canvasCtx.fillStyle = "#333333"; canvasCtx.fillRect(barX, 150, barWidth, barHeight);
                         canvasCtx.fillStyle = barColor; canvasCtx.fillRect(barX, 150, barWidth * progressPct, barHeight);
                     }
@@ -401,13 +457,12 @@ function onResults(results) {
 
                     let progressPct = Math.min(accumulatedStretchTime / 1500, 1.0);
                     if (progressPct >= 1.0) {
-                        playSuccessDing(); // DING!
-                        stretchPhase = 5; accumulatedStretchTime = 0; stretchStartTime = null;
+                        playSuccessDing(); stretchPhase = 5; accumulatedStretchTime = 0; stretchStartTime = null;
                     } else {
                         canvasCtx.fillStyle = "#FFFFFF"; canvasCtx.font = "bold 35px Arial";
-                        canvasCtx.fillText("Transition...", canvasElement.width / 2, 80);
+                        canvasCtx.fillText("Transition...", canvasElement.width / 2, 60);
                         canvasCtx.font = "24px Arial"; canvasCtx.fillStyle = barColor;
-                        canvasCtx.fillText(instruction, canvasElement.width / 2, 120);
+                        canvasCtx.fillText(instruction, canvasElement.width / 2, 100);
                         canvasCtx.fillStyle = "#333333"; canvasCtx.fillRect(barX, 150, barWidth, barHeight);
                         canvasCtx.fillStyle = barColor; canvasCtx.fillRect(barX, 150, barWidth * progressPct, barHeight);
                     }
@@ -428,13 +483,12 @@ function onResults(results) {
 
                     let progressPct = Math.min(accumulatedStretchTime / targetStretchTime, 1.0);
                     if (progressPct >= 1.0) {
-                        playSuccessDing(); // DING! (Final Victory Ding!)
-                        stretchPhase = 6; 
+                        playSuccessDing(); stretchPhase = 6; 
                     } else {
                         canvasCtx.fillStyle = "#FFFFFF"; canvasCtx.font = "bold 35px Arial";
-                        canvasCtx.fillText("5/5: Torso Twist", canvasElement.width / 2, 80);
+                        canvasCtx.fillText("5/5: Opposite Torso Twist", canvasElement.width / 2, 60);
                         canvasCtx.font = "24px Arial"; canvasCtx.fillStyle = barColor;
-                        canvasCtx.fillText(instruction, canvasElement.width / 2, 120);
+                        canvasCtx.fillText(instruction, canvasElement.width / 2, 100);
                         canvasCtx.fillStyle = "#333333"; canvasCtx.fillRect(barX, 150, barWidth, barHeight);
                         canvasCtx.fillStyle = barColor; canvasCtx.fillRect(barX, 150, barWidth * progressPct, barHeight);
                     }
@@ -442,8 +496,7 @@ function onResults(results) {
 
                 // === PHASE 6: VICTORY ===
                 else if (stretchPhase === 6) {
-                    canvasCtx.fillStyle = "#f1c40f"; 
-                    canvasCtx.font = "bold 50px Arial";
+                    canvasCtx.fillStyle = "#f1c40f"; canvasCtx.font = "bold 50px Arial";
                     canvasCtx.fillText("WORKOUT COMPLETE!", canvasElement.width / 2, canvasElement.height / 2);
                     canvasCtx.font = "20px Arial"; canvasCtx.fillStyle = "#FFFFFF";
                     canvasCtx.fillText("Click 'Cancel Stretch' to resume tracking", canvasElement.width / 2, canvasElement.height / 2 + 50);
