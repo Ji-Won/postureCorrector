@@ -179,51 +179,43 @@ function playSuccessDing() {
     oscillator.stop(audioCtx.currentTime + 1.5);
 }
 
-// --- ETHEREAL PROGRESS HUM (Relaxation / Ocean Vibe) ---
-let oscBase = null, oscFifth = null, oscOctave = null;
+// --- ULTRA-SUBTLE PROGRESS HUM ---
+let oscBase = null, oscFifth = null;
 let progressGainNode = null;
 let isHumming = false;
 
 function setProgressHum(active) {
     if (!audioCtx || audioCtx.state === 'suspended') return;
     
-    // Create the ambient chord generators the first time
     if (!oscBase) {
         progressGainNode = audioCtx.createGain();
         progressGainNode.gain.setValueAtTime(0, audioCtx.currentTime); 
 
-        // Base note (Deep C3)
+        // Warm, low-mid base note (F3)
         oscBase = audioCtx.createOscillator(); 
         oscBase.type = 'sine'; 
-        oscBase.frequency.value = 130.81; 
+        oscBase.frequency.value = 174.61; 
         
-        // Perfect Fifth (Soothing G3)
+        // Soft harmonic fifth (C4)
         oscFifth = audioCtx.createOscillator(); 
         oscFifth.type = 'sine'; 
-        oscFifth.frequency.value = 196.00; 
+        oscFifth.frequency.value = 261.63; 
 
-        // Octave up (Ethereal C4)
-        oscOctave = audioCtx.createOscillator(); 
-        oscOctave.type = 'sine'; 
-        oscOctave.frequency.value = 261.63; 
-
-        // Connect all three notes to the same master volume control
         oscBase.connect(progressGainNode);
         oscFifth.connect(progressGainNode);
-        oscOctave.connect(progressGainNode);
         progressGainNode.connect(audioCtx.destination);
 
         oscBase.start(); 
         oscFifth.start(); 
-        oscOctave.start();
     }
 
     if (active && !isHumming) {
-        // Time constant of 1.5 creates a slow, rolling "ocean wave" fade-in
-        progressGainNode.gain.setTargetAtTime(0.15, audioCtx.currentTime, 1.5); 
+        // Volume drastically reduced to 0.03 (a whisper)
+        // Fade-in time stretched to 2.5 seconds to sneak in seamlessly
+        progressGainNode.gain.setTargetAtTime(0.03, audioCtx.currentTime, 2.5); 
         isHumming = true;
     } else if (!active && isHumming) {
-        // Fades out gently like water receding from the sand
+        // Quick fade out so it doesn't linger
         progressGainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.5); 
         isHumming = false;
     }
