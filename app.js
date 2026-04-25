@@ -38,6 +38,12 @@ let recentRatios = [];
 // The Master Database for this session
 let sessionHistory = []; 
 
+// Stretch Routine Variables
+let stretchStartTime = null;
+let accumulatedStretchTime = 0;
+const targetStretchTime = 5000; // 5 seconds for the prototype
+let stretchCompleted = false;
+
 // Initialize Chart.js
 const postureChart = new Chart(chartCtx, {
     type: 'line',
@@ -104,6 +110,11 @@ stretchBtn.addEventListener('click', () => {
         appState = "stretching";
         stretchBtn.innerText = "Cancel Stretch";
         stretchBtn.style.backgroundColor = "#c0392b"; // Turn red to cancel
+
+        //reset the stretch every time you enter the mode
+        accumulatedStretchTime = 0;
+        stretchStartTime = null;
+        stretchCompleted = false;
     } else {
         appState = "tracking";
         stretchBtn.innerText = "Start Stretch Break";
@@ -234,23 +245,78 @@ function onResults(results) {
                     graphUpdateTimer = Date.now(); recentRatios = []; 
                 }
             }
-            // --- STATE 3: STRETCH MODE (NEW!) ---
+            // --- STATE 3: STRETCH MODE ---
             else if (appState === "stretching") {
-                // Dim the background slightly to show we are in a different mode
-                canvasCtx.fillStyle = "rgba(0, 0, 0, 0.5)";
+                // Dim the video slightly to make the UI pop
+                canvasCtx.fillStyle = "rgba(0, 0, 0, 0.7)";
                 canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
-                canvasCtx.fillStyle = "#9b59b6"; // Purple text
-                canvasCtx.font = "bold 40px Arial";
-                canvasCtx.textAlign = "center"; // Center the text easily
-                canvasCtx.fillText("STRETCH MODE ACTIVE", canvasElement.width / 2, canvasElement.height / 2);
-                
-                canvasCtx.fillStyle = "#FFFFFF";
-                canvasCtx.font = "20px Arial";
-                canvasCtx.fillText("(Stretch geometry logic goes here!)", canvasElement.width / 2, canvasElement.height / 2 + 40);
-                
-                // Reset text alignment so it doesn't break our tracking UI later
-                canvasCtx.textAlign = "left"; 
+                if (stretchCompleted) {
+                    // VICTORY SCREEN
+                    canvasCtx.fillStyle = "#f1c40f"; // Gold
+                    canvasCtx.font = "bold 50px Arial";
+                    canvasCtx.textAlign = "center";
+                    canvasCtx.fillText("STRETCH COMPLETE!", canvasElement.width / 2, canvasElement.height / 2);
+                    canvasCtx.font = "20px Arial";
+                    canvasCtx.fillStyle = "#FFFFFF";
+                    canvasCtx.fillText("Click 'Cancel Stretch' to resume tracking", canvasElement.width / 2, canvasElement.height / 2 + 50);
+                } 
+                else {
+                    // 1. Check the Geometry (Are they tilting their head?)
+                    const earTiltMagnitude = Math.abs(leftEarY - rightEarY);
+                    const isTilting = earTiltMagnitude > 0.06; // 0.06 is the "tilt threshold"
+
+                    let instruction = "Tilt your head to either side!";
+                    let barColor = "#e74c3c"; // Red (Not stretching)
+
+                    // 2. The Play/Pause Timer Logic
+                    if (isTilting) {
+                        instruction = "Hold it right there!";
+                        barColor = "#2ecc71"; // Green (Stretching!)
+                        
+                        // If they just started tilting, mark the time
+                        if (!stretchStartTime) stretchStartTime = Date.now();
+                        
+                        // Add the time elapsed since the last frame to the total
+                        accumulatedStretchTime += (Date.now() - stretchStartTime);
+                        stretchStartTime = Date.now(); // Reset for the next frame
+                    } else {
+                        // If they stop tilting, pause the timer
+                        stretchStartTime = null; 
+                    }
+
+                    // Calculate Progress Percentage (0.0 to 1.0)
+                    let progressPct = accumulatedStretchTime / targetStretchTime;
+                    if (progressPct >= 1.0) {
+                        progressPct = 1.0;
+                        stretchCompleted = true; // They did it!
+                    }
+
+                    // 3. Draw the Gamified UI
+                    canvasCtx.textAlign = "center";
+                    
+                    canvasCtx.fillStyle = "#FFFFFF";
+                    canvasCtx.font = "bold 35px Arial";
+                    canvasCtx.fillText("Neck Stretch", canvasElement.width / 2, 80);
+                    
+                    canvasCtx.font = "24px Arial";
+                    canvasCtx.fillStyle = barColor;
+                    canvasCtx.fillText(instruction, canvasElement.width / 2, 120);
+
+                    // Draw Progress Bar Background (Dark Grey)
+                    const barWidth = 400;
+                    const barHeight = 30;
+                    const barX = (canvasElement.width - barWidth) / 2;
+                    const barY = 150;
+                    canvasCtx.fillStyle = "#333333";
+                    canvasCtx.fillRect(barX, barY, barWidth, barHeight);
+
+                    // Draw Progress Bar Fill (Dynamic Color)
+                    canvasCtx.fillStyle = barColor;
+                    canvasCtx.fillRect(barX, barY, barWidth * progressPct, barHeight);
+                }
+
+                canvasCtx.textAlign = "left"; // Reset text alignment for the rest of the app 
             }
         }
         drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#f57542', lineWidth: 4});
