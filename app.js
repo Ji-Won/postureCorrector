@@ -30,6 +30,11 @@ let totalFramesTracked = 0;
 let goodFramesTracked = 0;
 let sessionStartTime = null;
 
+// --- POMODORO VARIABLES ---
+let lastStretchTime = Date.now();
+const pomodoroInterval = 50 * 60 * 1000; // 50 minutes (in milliseconds)
+let pomodoroTriggered = false;
+
 const chartCtx = document.getElementById('timelineChart').getContext('2d');
 const timeScopeSelect = document.getElementById('timeScope');
 let graphUpdateTimer = 0;
@@ -111,7 +116,6 @@ recalibrateBtn.addEventListener('click', () => {
 });
 
 stretchBtn.addEventListener('click', () => {
-    // NEW: Ensure audio is unlocked when starting a stretch so the ding plays!
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') audioCtx.resume();
 
@@ -130,7 +134,11 @@ stretchBtn.addEventListener('click', () => {
         appState = "tracking";
         stretchBtn.innerText = "Start Stretch Break";
         stretchBtn.style.backgroundColor = "#9b59b6"; 
-        setProgressHum(false);
+        
+        // NEW: Reset Pomodoro timer when returning to tracking
+        lastStretchTime = Date.now();
+        pomodoroTriggered = false;
+        setProgressHum(false); 
     }
 });
 
@@ -307,6 +315,31 @@ function onResults(results) {
                 scoreVal.innerText = `${scorePercentage}%`;
                 const minutesTracked = Math.floor((Date.now() - sessionStartTime) / 60000);
                 timeVal.innerText = `${minutesTracked}m`;
+
+                // --- NEW: POMODORO AUTO-TRIGGER LOGIC ---
+                if (Date.now() - lastStretchTime >= pomodoroInterval) {
+                    if (!pomodoroTriggered) {
+                        pomodoroTriggered = true;
+                        playSuccessDing(); // Gentle audio nudge
+                        
+                        // Fire OS Notification if alerts are enabled
+                        if (alertsEnabled && Notification.permission === 'granted') {
+                            new Notification("Time to Stretch!", { 
+                                body: "You've been working hard. Time for a quick 5-minute stretch break!",
+                                icon: "https://cdn-icons-png.flaticon.com/512/190/190411.png"
+                            });
+                        }
+                    }
+                    
+                    // Draw a visual reminder banner on the top of the video feed
+                    canvasCtx.fillStyle = "rgba(155, 89, 182, 0.85)"; // Purple overlay
+                    canvasCtx.fillRect(0, 0, canvasElement.width, 60);
+                    canvasCtx.fillStyle = "#FFFFFF";
+                    canvasCtx.font = "bold 24px Arial";
+                    canvasCtx.textAlign = "center";
+                    canvasCtx.fillText("Time for a stretch break! Click the purple button.", canvasElement.width / 2, 38);
+                    canvasCtx.textAlign = "left"; // Reset alignment
+                }
 
                 if (Date.now() - graphUpdateTimer > 5000) {
                     const avgRecentRatio = recentRatios.reduce((a, b) => a + b, 0) / recentRatios.length;
