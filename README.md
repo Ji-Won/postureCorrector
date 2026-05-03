@@ -23,7 +23,7 @@ Built entirely with frontend technologies, the AI model runs 100% locally in you
 
 ## 🚀 Live Demo
 
-[Play the Live Demo Here!](https://Ji-Won.github.io/postureCorrector)
+[Play the Live Demo Here!](https://ji-won.github.io/postureCorrector/)
 *(Note: Be sure to grant camera permissions when prompted. The model may take a few seconds to load initially.)*
 
 ## 💻 Local Development Setup
